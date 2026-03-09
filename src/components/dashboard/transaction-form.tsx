@@ -17,7 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { stockUniverse } from "@/lib/mock-data";
-import type { TradeSide, Transaction } from "@/lib/types";
+import type { TradeSide, TransactionInput } from "@/lib/types";
 
 const SHARES_PER_LOT = 100;
 
@@ -40,7 +40,7 @@ const defaultDraft: TransactionDraft = {
 };
 
 interface TransactionFormProps {
-  onCreate: (transaction: Transaction) => void;
+  onCreate: (transaction: TransactionInput) => Promise<void>;
 }
 
 export function TransactionForm({ onCreate }: TransactionFormProps) {
@@ -48,6 +48,7 @@ export function TransactionForm({ onCreate }: TransactionFormProps) {
   const [tickerQuery, setTickerQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredStocks = useMemo(() => {
     const keyword = tickerQuery.trim().toLowerCase();
@@ -95,8 +96,9 @@ export function TransactionForm({ onCreate }: TransactionFormProps) {
     updateDraft("ticker", exact ? exact.ticker : normalized);
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) return;
     setError("");
 
     const ticker = draft.ticker.trim().toUpperCase();
@@ -119,23 +121,33 @@ export function TransactionForm({ onCreate }: TransactionFormProps) {
       return;
     }
 
-    onCreate({
-      id: crypto.randomUUID(),
-      date: draft.date,
-      ticker,
-      side: draft.side,
-      quantity,
-      price,
-      fee: brokerFee,
-      note: draft.note.trim() || undefined,
-    });
+    setIsSubmitting(true);
 
-    setDraft((current) => ({
-      ...defaultDraft,
-      date: current.date,
-      side: current.side,
-    }));
-    setTickerQuery("");
+    try {
+      await onCreate({
+        date: draft.date,
+        ticker,
+        side: draft.side,
+        quantity,
+        price,
+        note: draft.note.trim() || undefined,
+      });
+
+      setDraft((current) => ({
+        ...defaultDraft,
+        date: current.date,
+        side: current.side,
+      }));
+      setTickerQuery("");
+    } catch (submissionError) {
+      const message =
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Failed to save transaction.";
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -261,8 +273,8 @@ export function TransactionForm({ onCreate }: TransactionFormProps) {
 
           {error ? <p className="text-small text-destructive">{error}</p> : null}
 
-          <Button type="submit" className="mt-auto w-full">
-            Save Transaction
+          <Button type="submit" className="mt-auto w-full" disabled={isSubmitting}>
+            {isSubmitting ? "Saving..." : "Save Transaction"}
           </Button>
         </form>
       </CardContent>

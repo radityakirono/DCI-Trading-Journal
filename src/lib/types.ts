@@ -15,6 +15,15 @@ export interface Transaction {
   note?: string;
 }
 
+export interface TransactionInput {
+  date: string;
+  ticker: string;
+  side: TradeSide;
+  quantity: number;
+  price: number;
+  note?: string;
+}
+
 export interface EquityPoint {
   date: string;
   equity: number;
@@ -24,6 +33,13 @@ export interface EquityPoint {
 
 export interface CashFlowEntry {
   id: string;
+  date: string;
+  type: CashFlowType;
+  amount: number;
+  note?: string;
+}
+
+export interface CashFlowEntryInput {
   date: string;
   type: CashFlowType;
   amount: number;

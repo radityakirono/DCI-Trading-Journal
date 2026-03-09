@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DCI (Dhoho Capital Investment)
 
-## Getting Started
+Personal stock trading journal for IDX equities, built with Next.js, Tailwind, shadcn/ui, and Supabase.
 
-First, run the development server:
+## Run Locally
+
+1. Copy environment variables:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Fill in:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Install and run:
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security Baseline (Implemented)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Authenticated API routes for:
+  - `POST/GET /api/transactions`
+  - `POST/GET /api/cash-journal`
+  - `GET /api/signal-notifications`
+- Server-side payload validation with `zod`.
+- Server-side broker fee calculation (buy 0.15%, sell 0.25%).
+- HTTP security headers + CSP in `next.config.ts`.
+- CI security workflows:
+  - GitHub CodeQL
+  - Dependency Review
+  - `npm audit` (high+)
+  - Optional Snyk scan if `SNYK_TOKEN` is configured.
 
-## Deploy on Vercel
+## Supabase RLS Setup
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Run this SQL script in Supabase SQL Editor:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [`supabase/sql/001_security_baseline.sql`](supabase/sql/001_security_baseline.sql)
+
+What it configures:
+
+- `user_id` ownership columns on `transactions`, `cash_journal`, `signal_notifications`
+- strict row-level security policies (users only access their own rows)
+- indexes for user/date access patterns
+- `audit_logs` table
+- triggers to auto-log `INSERT/UPDATE/DELETE` on `transactions` and `cash_journal`
+
+## Important Notes
+
+- Do not expose service-role keys in browser code.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` server-only (if used for backend jobs).
+- The frontend supports local fallback mode when unauthenticated, but secure persistence and sync require authenticated Supabase sessions.
+
+## Build
+
+```bash
+npm run lint
+npm run build
+```

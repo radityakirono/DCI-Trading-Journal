@@ -12,6 +12,14 @@ import { PortfolioTable } from "@/components/dashboard/portfolio-table";
 import { TransactionForm } from "@/components/dashboard/transaction-form";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  ApiError,
+  createCashJournalEntry,
+  createTransaction,
+  fetchCashJournal,
+  fetchSignalNotifications,
+  fetchTransactions,
+} from "@/lib/api-client";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "@/lib/format";
 import {
   initialCashJournal,
@@ -19,12 +27,15 @@ import {
   initialTransactions,
   marketPrices,
 } from "@/lib/mock-data";
-import {
-  fetchSignalNotifications,
-  getDefaultSignalNotifications,
-} from "@/lib/signal-notifications";
-import { supabase } from "@/lib/supabase/client";
-import type { CashFlowEntry, SignalNotification, Transaction } from "@/lib/types";
+import { getDefaultSignalNotifications } from "@/lib/signal-notifications";
+import { calculateBrokerFee } from "@/lib/trading";
+import type {
+  CashFlowEntry,
+  CashFlowEntryInput,
+  SignalNotification,
+  Transaction,
+  TransactionInput,
+} from "@/lib/types";
 
 const SHARES_PER_LOT = 100;
 
@@ -34,6 +45,7 @@ export default function HomePage() {
   const [signalNotifications, setSignalNotifications] = useState<SignalNotification[]>(
     getDefaultSignalNotifications
   );
+  const [syncNotice, setSyncNotice] = useState<string>("");
 
   const latestEquity = initialEquitySeries[initialEquitySeries.length - 1]?.equity ?? 0;
   const previousEquity = initialEquitySeries[initialEquitySeries.length - 2]?.equity ?? 0;
@@ -65,62 +77,113 @@ export default function HomePage() {
     [transactions]
   );
 
-  async function persistTransaction(trade: Transaction) {
-    if (!supabase) return;
+  async function handleCreateTransaction(input: TransactionInput) {
+    try {
+      const created = await createTransaction(input);
+      setTransactions((current) => [created, ...current]);
+      setSyncNotice("");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const fallback: Transaction = {
+          id: crypto.randomUUID(),
+          date: input.date,
+          ticker: input.ticker,
+          side: input.side,
+          quantity: input.quantity,
+          price: input.price,
+          fee: calculateBrokerFee(input.side, input.quantity, input.price),
+          note: input.note,
+        };
+        setTransactions((current) => [fallback, ...current]);
+        setSyncNotice("Not signed in. Transaction was saved locally only.");
+        return;
+      }
 
-    const { error } = await supabase.from("transactions").insert({
-      id: trade.id,
-      date: trade.date,
-      ticker: trade.ticker,
-      side: trade.side,
-      quantity: trade.quantity,
-      price: trade.price,
-      fee: trade.fee,
-      note: trade.note ?? null,
-    });
-
-    if (error) {
-      console.error("Supabase insert failed for transaction:", error.message);
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to save transaction.");
     }
   }
 
-  async function persistCashEntry(entry: CashFlowEntry) {
-    if (!supabase) return;
+  async function handleCreateCashEntry(input: CashFlowEntryInput) {
+    try {
+      const created = await createCashJournalEntry(input);
+      setCashJournal((current) => [created, ...current]);
+      setSyncNotice("");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const fallback: CashFlowEntry = {
+          id: crypto.randomUUID(),
+          date: input.date,
+          type: input.type,
+          amount: input.amount,
+          note: input.note,
+        };
+        setCashJournal((current) => [fallback, ...current]);
+        setSyncNotice("Not signed in. Journal entry was saved locally only.");
+        return;
+      }
 
-    const { error } = await supabase.from("cash_journal").insert({
-      id: entry.id,
-      date: entry.date,
-      type: entry.type,
-      amount: entry.amount,
-      note: entry.note ?? null,
-    });
-
-    if (error) {
-      console.error("Supabase insert failed for cash journal:", error.message);
+      throw error instanceof Error
+        ? error
+        : new Error("Failed to save journal entry.");
     }
   }
 
-  function handleCreateTransaction(transaction: Transaction) {
-    setTransactions((current) => [transaction, ...current]);
-    void persistTransaction(transaction);
-  }
+  const loadCoreData = useCallback(async () => {
+    try {
+      const [remoteTransactions, remoteCashJournal] = await Promise.all([
+        fetchTransactions(),
+        fetchCashJournal(),
+      ]);
 
-  function handleCreateCashEntry(entry: CashFlowEntry) {
-    setCashJournal((current) => [entry, ...current]);
-    void persistCashEntry(entry);
-  }
+      setTransactions(remoteTransactions);
+      setCashJournal(remoteCashJournal);
+      setSyncNotice("");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setSyncNotice("Sign in to sync transactions and cash journal with Supabase.");
+        return;
+      }
+
+      const message =
+        error instanceof Error ? error.message : "Failed to sync data.";
+      console.error("Failed to sync core data:", message);
+    }
+  }, []);
 
   const loadSignalNotifications = useCallback(async () => {
     try {
       const latest = await fetchSignalNotifications();
       setSignalNotifications(latest);
+      setSyncNotice("");
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setSyncNotice(
+          "Sign in to sync notifications with Supabase signal feeds."
+        );
+        return;
+      }
+
       const message =
         error instanceof Error ? error.message : "Unexpected fetch error";
       console.error("Supabase load failed for signal notifications:", message);
       return;
     }
   }, []);
+
+  useEffect(() => {
+    const run = () => {
+      void loadCoreData();
+      void loadSignalNotifications();
+    };
+
+    const initialTimer = window.setTimeout(run, 0);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+    };
+  }, [loadCoreData, loadSignalNotifications]);
 
   useEffect(() => {
     const run = () => {
@@ -148,6 +211,10 @@ export default function HomePage() {
             <ThemeToggle />
           </div>
         </div>
+
+        {syncNotice ? (
+          <p className="mb-3 text-sm text-amber-500">{syncNotice}</p>
+        ) : null}
 
         <div className="grid gap-6 xl:grid-cols-12">
           <AnimatedSection id="equity" className="h-full xl:col-span-8">

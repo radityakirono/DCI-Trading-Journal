@@ -15,9 +15,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  ApiError,
   fetchSignalNotifications,
-  getDefaultSignalNotifications,
-} from "@/lib/signal-notifications";
+} from "@/lib/api-client";
+import { getDefaultSignalNotifications } from "@/lib/signal-notifications";
 import type { SignalNotification } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ export default function NotificationsPage() {
   );
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string>("");
 
   const groupedNotifications = useMemo<NotificationDayGroup[]>(() => {
     const groups = new Map<string, NotificationDayGroup>();
@@ -76,7 +78,15 @@ export default function NotificationsPage() {
     try {
       const latest = await fetchSignalNotifications();
       setNotifications(latest);
+      setSyncNotice("");
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setSyncNotice(
+          "Sign in to load notifications from Supabase. Showing local sample data."
+        );
+        return;
+      }
+
       const message =
         error instanceof Error ? error.message : "Unexpected fetch error";
       console.error("Failed to load signal notifications:", message);
@@ -134,6 +144,9 @@ export default function NotificationsPage() {
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+          {syncNotice ? (
+            <p className="text-sm text-amber-500 lg:col-span-2">{syncNotice}</p>
+          ) : null}
           <Card className="h-fit">
             <CardHeader className="border-b border-border/50">
               <CardTitle className="text-base">Notification Days</CardTitle>

@@ -1,10 +1,9 @@
 import { initialSignalNotifications } from "@/lib/mock-data";
-import { supabase } from "@/lib/supabase/client";
 import type { SignalNotification, SignalType } from "@/lib/types";
 
 const SIGNAL_TYPES: SignalType[] = ["BUY", "SELL", "HOLD", "ALERT"];
 
-type SignalRow = {
+export type SignalRow = {
   id: string;
   created_at: string;
   ticker: string;
@@ -16,7 +15,7 @@ type SignalRow = {
 };
 
 export function getDefaultSignalNotifications(): SignalNotification[] {
-  return supabase ? [] : initialSignalNotifications;
+  return initialSignalNotifications;
 }
 
 export function normalizeSignalType(value?: string | null): SignalType {
@@ -27,26 +26,8 @@ export function normalizeSignalType(value?: string | null): SignalType {
   return "ALERT";
 }
 
-export async function fetchSignalNotifications(
-  limit = 120
-): Promise<SignalNotification[]> {
-  if (!supabase) {
-    return initialSignalNotifications;
-  }
-
-  const { data, error } = await supabase
-    .from("signal_notifications")
-    .select(
-      "id, created_at, ticker, signal_type, message, source, confidence, read_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return ((data ?? []) as SignalRow[]).map((row) => ({
+export function mapSignalRows(rows: SignalRow[]): SignalNotification[] {
+  return rows.map((row) => ({
     id: row.id,
     createdAt: row.created_at,
     ticker: row.ticker,

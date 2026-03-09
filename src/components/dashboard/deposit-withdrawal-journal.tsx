@@ -28,11 +28,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatLongDate } from "@/lib/format";
-import type { CashFlowEntry, CashFlowType } from "@/lib/types";
+import type { CashFlowEntry, CashFlowEntryInput, CashFlowType } from "@/lib/types";
 
 interface DepositWithdrawalJournalProps {
   entries: CashFlowEntry[];
-  onCreate: (entry: CashFlowEntry) => void;
+  onCreate: (entry: CashFlowEntryInput) => Promise<void>;
 }
 
 export function DepositWithdrawalJournal({
@@ -44,6 +44,8 @@ export function DepositWithdrawalJournal({
   const [type, setType] = useState<CashFlowType>("DEPOSIT");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [error, setError] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => b.date.localeCompare(a.date)),
@@ -56,32 +58,49 @@ export function DepositWithdrawalJournal({
     return sum + entry.amount;
   }, 0);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) return;
+    setError("");
+
     const numericAmount = Number(amount);
 
     if (!date || !Number.isFinite(numericAmount)) {
+      setError("Please complete all required fields.");
       return;
     }
 
     if (type !== "ADJUSTMENT" && numericAmount <= 0) {
+      setError("Deposit and withdrawal amounts must be greater than zero.");
       return;
     }
 
     if (type === "ADJUSTMENT" && numericAmount === 0) {
+      setError("Adjustment amount cannot be zero.");
       return;
     }
 
-    onCreate({
-      id: crypto.randomUUID(),
-      date,
-      type,
-      amount: numericAmount,
-      note: note.trim() || undefined,
-    });
+    setIsSubmitting(true);
 
-    setAmount("");
-    setNote("");
+    try {
+      await onCreate({
+        date,
+        type,
+        amount: numericAmount,
+        note: note.trim() || undefined,
+      });
+
+      setAmount("");
+      setNote("");
+    } catch (submissionError) {
+      const message =
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Failed to save journal entry.";
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -158,9 +177,11 @@ export function DepositWithdrawalJournal({
               />
             </div>
 
-            <Button type="submit" variant="secondary">
-              Save Journal Entry
+            <Button type="submit" variant="secondary" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : "Save Journal Entry"}
             </Button>
+
+            {error ? <p className="text-small text-destructive">{error}</p> : null}
           </form>
         ) : null}
 
