@@ -62,7 +62,9 @@ export function useRealtimeSignals() {
       });
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 

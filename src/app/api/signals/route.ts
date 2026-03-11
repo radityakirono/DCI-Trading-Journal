@@ -5,12 +5,13 @@
  * Supports ?limit=N (default 50) and ?status=PENDING|SENT etc.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabaseAdmin = getSupabaseAdmin();
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
     const status = searchParams.get('status');

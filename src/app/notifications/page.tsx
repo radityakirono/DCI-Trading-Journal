@@ -6,6 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
+interface TradeTicket {
+  target_entry?: number;
+  size_lots?: number;
+  risk_amount?: number;
+}
+
 interface QuantSignal {
   id: string;
   signal_ts: string;
@@ -17,7 +23,7 @@ interface QuantSignal {
   regime: string | null;
   conviction: number | null;
   supporting_metrics: Record<string, unknown>;
-  trade_ticket: Record<string, unknown>;
+  trade_ticket: TradeTicket | null;
   delivery_status: string;
   read_at: string | null;
 }
@@ -233,19 +239,19 @@ export default function NotificationsPage() {
                   <p className="mt-2 text-sm text-muted-foreground">
                     {signal.message}
                   </p>
-                  {signal.trade_ticket && Object.keys(signal.trade_ticket).length > 0 && (
+                  {signal.trade_ticket && Object.keys(signal.trade_ticket).length > 0 ? (
                     <div className="mt-2 text-xs font-mono bg-muted/50 p-2 rounded">
-                      {signal.trade_ticket.target_entry && (
+                      {signal.trade_ticket.target_entry != null ? (
                         <span>Entry: Rp{Number(signal.trade_ticket.target_entry).toLocaleString('id-ID')}</span>
-                      )}
-                      {signal.trade_ticket.size_lots && (
+                      ) : null}
+                      {signal.trade_ticket.size_lots != null ? (
                         <span className="ml-3">Size: {String(signal.trade_ticket.size_lots)} lots</span>
-                      )}
-                      {signal.trade_ticket.risk_amount && (
+                      ) : null}
+                      {signal.trade_ticket.risk_amount != null ? (
                         <span className="ml-3">Risk: Rp{Number(signal.trade_ticket.risk_amount).toLocaleString('id-ID')}</span>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ))}
             </div>
