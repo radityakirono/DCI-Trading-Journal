@@ -1,269 +1,257 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { useEffect, useState, useCallback } from 'react';
+import { useRealtimeSignals } from '@/lib/hooks/useRealtimeSignals';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
-import { DciLogo } from "@/components/brand/dci-logo";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  ApiError,
-  fetchSignalNotifications,
-} from "@/lib/api-client";
-import { getDefaultSignalNotifications } from "@/lib/signal-notifications";
-import type { SignalNotification } from "@/lib/types";
-import { cn } from "@/lib/utils";
-
-interface NotificationDayGroup {
-  dayKey: string;
-  dayLabel: string;
-  items: SignalNotification[];
+interface QuantSignal {
+  id: string;
+  signal_ts: string;
+  ticker: string;
+  ticker_short: string;
+  signal_type: 'BUY' | 'SELL' | 'HOLD' | 'ALERT';
+  raw_action: string;
+  message: string;
+  regime: string | null;
+  conviction: number | null;
+  supporting_metrics: Record<string, unknown>;
+  trade_ticket: Record<string, unknown>;
+  delivery_status: string;
+  read_at: string | null;
 }
 
+interface SignalRun {
+  run_id: string;
+  slot_key: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  engine_version: string | null;
+  metrics: Record<string, unknown>;
+}
+
+const SIGNAL_BADGE_VARIANTS: Record<string, string> = {
+  BUY: 'bg-emerald-600 text-white',
+  SELL: 'bg-red-600 text-white',
+  HOLD: 'bg-amber-500 text-black',
+  ALERT: 'bg-blue-600 text-white',
+};
+
+const RUN_STATUS_COLORS: Record<string, string> = {
+  COMPLETED: 'bg-emerald-600 text-white',
+  RUNNING: 'bg-blue-500 text-white animate-pulse',
+  FAILED: 'bg-red-600 text-white',
+  SKIPPED: 'bg-zinc-500 text-white',
+  PARTIAL: 'bg-amber-500 text-black',
+};
+
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<SignalNotification[]>(
-    getDefaultSignalNotifications
-  );
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [syncNotice, setSyncNotice] = useState<string>("");
+  const [signals, setSignals] = useState<QuantSignal[]>([]);
+  const [runs, setRuns] = useState<SignalRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const groupedNotifications = useMemo<NotificationDayGroup[]>(() => {
-    const groups = new Map<string, NotificationDayGroup>();
-    const sorted = [...notifications].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt)
-    );
+  const { newSignals, isConnected } = useRealtimeSignals();
 
-    for (const item of sorted) {
-      const dayKey = toLocalDayKey(new Date(item.createdAt));
-      if (!groups.has(dayKey)) {
-        groups.set(dayKey, {
-          dayKey,
-          dayLabel: formatDayLabel(dayKey),
-          items: [],
-        });
-      }
-      groups.get(dayKey)?.items.push(item);
-    }
-
-    return Array.from(groups.values()).sort((a, b) =>
-      b.dayKey.localeCompare(a.dayKey)
-    );
-  }, [notifications]);
-
-  const activeDayKey =
-    selectedDayKey && groupedNotifications.some((group) => group.dayKey === selectedDayKey)
-      ? selectedDayKey
-      : groupedNotifications[0]?.dayKey;
-
-  const activeGroup = groupedNotifications.find(
-    (group) => group.dayKey === activeDayKey
-  );
-
-  const unreadCount = useMemo(
-    () => notifications.filter((item) => !item.isRead).length,
-    [notifications]
-  );
-
-  const loadNotifications = useCallback(async () => {
-    setIsLoading(true);
+  const fetchSignals = useCallback(async () => {
     try {
-      const latest = await fetchSignalNotifications();
-      setNotifications(latest);
-      setSyncNotice("");
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setSyncNotice(
-          "Sign in to load notifications from Supabase. Showing local sample data."
-        );
-        return;
+      const [signalsRes, runsRes] = await Promise.all([
+        fetch('/api/signals?limit=50'),
+        fetch('/api/signal-runs?limit=10'),
+      ]);
+
+      if (!signalsRes.ok || !runsRes.ok) {
+        throw new Error('Failed to fetch signal data');
       }
 
-      const message =
-        error instanceof Error ? error.message : "Unexpected fetch error";
-      console.error("Failed to load signal notifications:", message);
+      const signalsData = await signalsRes.json();
+      const runsData = await runsRes.json();
+
+      setSignals(signalsData.signals || []);
+      setRuns(runsData.runs || []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const run = () => {
-      void loadNotifications();
-    };
+    fetchSignals();
+  }, [fetchSignals]);
 
-    const initialTimer = window.setTimeout(run, 0);
-    const intervalTimer = window.setInterval(run, 60_000);
+  // Merge realtime signals into the list
+  const allSignals = [
+    ...newSignals.filter(
+      (ns) => !signals.some((s) => s.id === ns.id)
+    ),
+    ...signals,
+  ];
 
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(intervalTimer);
-    };
-  }, [loadNotifications]);
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative min-h-screen bg-background pb-10">
-      <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(90%_70%_at_50%_0%,color-mix(in_oklch,var(--color-primary)_12%,transparent),transparent_72%)]" />
-
-      <main className="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-6 lg:px-8">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Link
-              href="/"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "sm" }),
-                "gap-1.5"
-              )}
-            >
-              <ArrowLeft className="size-4" />
-              Dashboard
-            </Link>
-            <DciLogo />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Refresh notifications"
-              onClick={() => void loadNotifications()}
-            >
-              <RefreshCw className={cn("size-4", isLoading && "animate-spin")} />
-            </Button>
-            <ThemeToggle />
-          </div>
-        </header>
-
-        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          {syncNotice ? (
-            <p className="text-sm text-amber-500 lg:col-span-2">{syncNotice}</p>
-          ) : null}
-          <Card className="h-fit">
-            <CardHeader className="border-b border-border/50">
-              <CardTitle className="text-base">Notification Days</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-4">
-              {groupedNotifications.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No notifications found.</p>
-              ) : (
-                groupedNotifications.map((group) => (
-                  <button
-                    key={group.dayKey}
-                    type="button"
-                    onClick={() => setSelectedDayKey(group.dayKey)}
-                    className={cn(
-                      "w-full rounded-lg border px-3 py-2 text-left transition-colors",
-                      activeDayKey === group.dayKey
-                        ? "border-primary/50 bg-primary/10"
-                        : "border-border/70 bg-card/60 hover:bg-muted"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">{group.dayLabel}</p>
-                      <Badge variant="outline">{group.items.length}</Badge>
-                    </div>
-                  </button>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="border-b border-border/50">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">
-                  {activeGroup ? activeGroup.dayLabel : "Notifications"}
-                </CardTitle>
-                <Badge variant="outline">{unreadCount} unread</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-4">
-              {activeGroup ? (
-                activeGroup.items.map((item) => (
-                  <article
-                    key={item.id}
-                    className="rounded-lg border border-border/70 bg-card/70 p-3"
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold">{item.ticker}</p>
-                        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", signalTypeClass(item.type))}>
-                          {item.type}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {formatTime(item.createdAt)}
-                      </p>
-                    </div>
-                    <p className="text-sm text-foreground">{item.message}</p>
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span>{item.source ?? "Signal Engine"}</span>
-                      <span>
-                        {item.confidence != null
-                          ? `Confidence ${(item.confidence * 100).toFixed(0)}%`
-                          : "Confidence -"}
-                      </span>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Select a day to view notifications.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Signal Notifications</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Automated trading signals from the QuantLite Alpha engine
+          </p>
         </div>
-      </main>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div
+              className={`h-2 w-2 rounded-full ${
+                isConnected ? 'bg-emerald-500' : 'bg-red-500'
+              }`}
+            />
+            <span className="text-xs text-muted-foreground">
+              {isConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchSignals}>
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="p-4">
+            <p className="text-sm text-destructive">Error: {error}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pipeline Runs */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">Recent Pipeline Runs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {runs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No pipeline runs recorded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {runs.map((run) => (
+                <div
+                  key={run.run_id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                >
+                  <div className="flex items-center gap-3">
+                    <Badge
+                      className={RUN_STATUS_COLORS[run.status] || 'bg-zinc-500 text-white'}
+                    >
+                      {run.status}
+                    </Badge>
+                    <span className="text-sm font-mono">{run.slot_key}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(run.started_at).toLocaleString('id-ID', {
+                      timeZone: 'Asia/Jakarta',
+                    })}
+                    {run.engine_version && (
+                      <span className="ml-2 opacity-60">{run.engine_version}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Signals */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">
+            Trading Signals
+            {allSignals.length > 0 && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                ({allSignals.length})
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {allSignals.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">
+                No trading signals generated yet.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Signals will appear here automatically when the engine generates them.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {allSignals.map((signal) => (
+                <div
+                  key={signal.id}
+                  className="p-4 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        className={SIGNAL_BADGE_VARIANTS[signal.signal_type] || 'bg-zinc-500'}
+                      >
+                        {signal.signal_type}
+                      </Badge>
+                      <span className="font-semibold text-lg">
+                        {signal.ticker_short}
+                      </span>
+                      {signal.regime && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted">
+                          {signal.regime}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      {signal.conviction !== null && (
+                        <div className="text-sm font-medium">
+                          {(signal.conviction * 100).toFixed(1)}% conviction
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(signal.signal_ts).toLocaleString('id-ID', {
+                          timeZone: 'Asia/Jakarta',
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {signal.message}
+                  </p>
+                  {signal.trade_ticket && Object.keys(signal.trade_ticket).length > 0 && (
+                    <div className="mt-2 text-xs font-mono bg-muted/50 p-2 rounded">
+                      {signal.trade_ticket.target_entry && (
+                        <span>Entry: Rp{Number(signal.trade_ticket.target_entry).toLocaleString('id-ID')}</span>
+                      )}
+                      {signal.trade_ticket.size_lots && (
+                        <span className="ml-3">Size: {String(signal.trade_ticket.size_lots)} lots</span>
+                      )}
+                      {signal.trade_ticket.risk_amount && (
+                        <span className="ml-3">Risk: Rp{Number(signal.trade_ticket.risk_amount).toLocaleString('id-ID')}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
-}
-
-function toLocalDayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatDayLabel(dayKey: string): string {
-  const dayDate = new Date(`${dayKey}T00:00:00`);
-  const today = toLocalDayKey(new Date());
-  const yesterdayDate = new Date();
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = toLocalDayKey(yesterdayDate);
-
-  if (dayKey === today) return "Today";
-  if (dayKey === yesterday) return "Yesterday";
-
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(dayDate);
-}
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
-function signalTypeClass(type: SignalNotification["type"]): string {
-  if (type === "BUY") return "bg-primary/15 text-primary";
-  if (type === "SELL") return "bg-destructive/15 text-destructive";
-  if (type === "HOLD") return "bg-blue-500/15 text-blue-500";
-  return "bg-amber-500/15 text-amber-500";
 }
