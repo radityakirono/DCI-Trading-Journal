@@ -17,7 +17,6 @@ import {
   createCashJournalEntry,
   createTransaction,
   fetchCashJournal,
-  fetchSignalNotifications,
   fetchTransactions,
 } from "@/lib/api-client";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "@/lib/format";
@@ -27,12 +26,10 @@ import {
   initialTransactions,
   marketPrices,
 } from "@/lib/mock-data";
-import { getDefaultSignalNotifications } from "@/lib/signal-notifications";
 import { calculateBrokerFee } from "@/lib/trading";
 import type {
   CashFlowEntry,
   CashFlowEntryInput,
-  SignalNotification,
   Transaction,
   TransactionInput,
 } from "@/lib/types";
@@ -42,9 +39,7 @@ const SHARES_PER_LOT = 100;
 export default function HomePage() {
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [cashJournal, setCashJournal] = useState<CashFlowEntry[]>(initialCashJournal);
-  const [signalNotifications, setSignalNotifications] = useState<SignalNotification[]>(
-    getDefaultSignalNotifications
-  );
+  const [signalCount, setSignalCount] = useState(0);
   const [syncNotice, setSyncNotice] = useState<string>("");
 
   const latestEquity = initialEquitySeries[initialEquitySeries.length - 1]?.equity ?? 0;
@@ -154,21 +149,14 @@ export default function HomePage() {
 
   const loadSignalNotifications = useCallback(async () => {
     try {
-      const latest = await fetchSignalNotifications();
-      setSignalNotifications(latest);
-      setSyncNotice("");
+      const res = await fetch('/api/signals?limit=50');
+      if (!res.ok) throw new Error('Failed to load signals');
+      const data = await res.json() as { signals: { id: string; read_at: string | null }[] };
+      const unread = (data.signals || []).filter((s) => !s.read_at).length;
+      setSignalCount(unread);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setSyncNotice(
-          "Sign in to sync notifications with Supabase signal feeds."
-        );
-        return;
-      }
-
-      const message =
-        error instanceof Error ? error.message : "Unexpected fetch error";
-      console.error("Supabase load failed for signal notifications:", message);
-      return;
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      console.error("Failed to load signal count:", message);
     }
   }, []);
 
@@ -207,7 +195,7 @@ export default function HomePage() {
         <div className="mb-6 flex items-center justify-between">
           <DciLogo />
           <div className="flex items-center gap-2">
-            <NotificationBell notifications={signalNotifications} />
+            <NotificationBell unreadCount={signalCount} />
             <ThemeToggle />
           </div>
         </div>
