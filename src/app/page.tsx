@@ -37,13 +37,14 @@ import {
   fetchCashJournal,
   fetchSignalNotifications,
   fetchTransactions,
+  fetchMarketPrices,
 } from "@/lib/api-client";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "@/lib/format";
 import {
   initialCashJournal,
   initialEquitySeries,
   initialTransactions,
-  marketPrices,
+  marketPrices as fallbackMarketPrices,
   initialSignalNotifications,
 } from "@/lib/mock-data";
 import { stockUniverse } from "@/lib/stock-universe";
@@ -64,6 +65,7 @@ export default function HomePage() {
   const [cashJournal, setCashJournal] = useState<CashFlowEntry[]>(initialCashJournal);
   const [signals, setSignals] = useState<SignalNotification[]>(initialSignalNotifications);
   const [signalCount, setSignalCount] = useState(0);
+  const [marketPrices, setMarketPrices] = useState<Record<string, number>>(fallbackMarketPrices);
   const [syncNotice, setSyncNotice] = useState<string>("");
 
   // ── Derived metrics ─────────────────────────────────
@@ -323,6 +325,23 @@ export default function HomePage() {
       window.clearInterval(interval);
     };
   }, [loadSignalNotifications]);
+
+  // Fetch live market prices whenever transactions change (providing new tickers)
+  useEffect(() => {
+    if (transactions.length === 0) return;
+    const tickers = Array.from(new Set(transactions.map((t) => t.ticker)));
+    let mounted = true;
+    
+    fetchMarketPrices(tickers).then((livePrices) => {
+      if (mounted && Object.keys(livePrices).length > 0) {
+        setMarketPrices((prev) => ({ ...prev, ...livePrices }));
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [transactions]);
 
   // ── Render ──────────────────────────────────────────
   return (

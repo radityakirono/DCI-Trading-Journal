@@ -121,3 +121,19 @@ export async function fetchSignalNotifications(
   );
   return payload.notifications;
 }
+
+export async function fetchMarketPrices(
+  tickers: string[]
+): Promise<Record<string, number>> {
+  if (tickers.length === 0) return {};
+  try {
+    const params = new URLSearchParams({ tickers: tickers.join(",") });
+    const response = await fetch(`/api/market-prices?${params.toString()}`);
+    if (!response.ok) return {};
+    const data = await response.json();
+    return data.prices || {};
+  } catch (err) {
+    console.error("Failed to fetch market prices:", err);
+    return {};
+  }
+}
